@@ -44,6 +44,10 @@ float dConstant = -0.6445;
 float eConstant = 45.775;
 bool errorCompensation = true;
 
+// Odometry Error Correction
+// A temporary workaround on the report of the odometry data from robot that is linearly inaccurate.
+float odomErrorCorrection = 1.13;
+
 // Set the desired point grid
 // For 640x480
 int desiredX[9] = { 160,200,240,280,320,360,400,440,480 };
@@ -124,7 +128,7 @@ public:
       (float)tf::getYaw(msg->pose.pose.orientation));*/
 
   // Assign position from ROS nav msg to global variable
-  currentPos = Point2f(1.13*(float)msg->pose.pose.position.x, 1.13*(float)msg->pose.pose.position.y);
+  currentPos = Point2f(odomErrorCorrection*(float)msg->pose.pose.position.x, odomErrorCorrection*(float)msg->pose.pose.position.y);
 }
 
   void spin()
@@ -284,7 +288,7 @@ public:
        	deltaY = (float)currentPos.y - (float)locationOfInitiation[goodPointsVecTransfer[i]].y;
 
        	// Calculate displacement that the robot makes.
-       	deltaPos = sqrt((deltaX*deltaX)+(deltaY*deltaY));
+       	deltaPos = abs(sqrt((deltaX*deltaX)+(deltaY*deltaY)));
 
         // Only calculate when 
         if (deltaPos >= 0.5)
