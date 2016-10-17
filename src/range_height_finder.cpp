@@ -27,7 +27,7 @@ float aConstant = -0.00305;
 float bConstant = 0.678;
 
 // deltaX is how far the camera has moved in X direction, deltaY is in Y direction, deltaPos is the displacement,
-// currentPos is where the robot now, cameraHeight is the hight of the camera from the ground
+// currentPos is where the robot now, cameraHeight is the height of the camera from the ground
 float deltaX;
 float deltaY;
 float deltaPos;
@@ -46,7 +46,7 @@ bool errorCompensation = true;
 
 // Odometry Error Correction
 // A temporary workaround on the report of the odometry data from robot that is linearly inaccurate.
-float odomErrorCorrection = 1.13;
+float odomErrorCorrection = 1;
 
 // Set the desired point grid
 // For 640x480
@@ -82,7 +82,7 @@ public:
       &ImageConverter::imageCb, this);*/
     image_pub_ = it_.advertise("/image_converter/output_video", 1);
 
-    subOdom = nh_.subscribe("/odom", 1, &ImageConverter::cbOdom,this);
+    subOdom = nh_.subscribe("/ypspur_ros/odom", 1, &ImageConverter::cbOdom,this);
 
     cv::namedWindow(OPENCV_WINDOW);
   }
@@ -288,7 +288,7 @@ public:
        	deltaY = (float)currentPos.y - (float)locationOfInitiation[goodPointsVecTransfer[i]].y;
 
        	// Calculate displacement that the robot makes.
-       	deltaPos = abs(sqrt((deltaX*deltaX)+(deltaY*deltaY)));
+       	deltaPos = sqrt((deltaX*deltaX)+(deltaY*deltaY));
 
         // Only calculate when 
         if (deltaPos >= 0.5)
