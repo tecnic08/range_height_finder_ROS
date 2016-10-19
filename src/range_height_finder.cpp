@@ -50,13 +50,13 @@ float odomErrorCorrection = 1;
 
 // Set the desired point grid
 // For 640x480
-int desiredX[9] = { 160,200,240,280,320,360,400,440,480 };
+int desiredX[9] = { 200,230,260,290,320,350,380,410,440 };
 int desiredY[5] = { 60,100,140,180,200 };
 
 
 // Declaring some flags
 bool pointTrackingFlag = true;
-bool calculateTrackpointFlag = false;
+bool calculateTrackpointFlag = true;
 bool clearTrackingFlag = false;
 bool recenterOffGridPointFlag = false;
 
@@ -246,11 +246,8 @@ public:
           continue;
                 }
 
-        // Point optimization (removed)
-        //trackingPoints[1][count++] = trackingPoints[1][i];
-
         // Track point icon
-        int radius = 8;
+        int radius = 5;
         int thickness = 2;
         int lineType = 3;
         circle(image, trackingPoints[1][i], radius, Scalar(0, 255, 0), thickness, lineType);
@@ -267,8 +264,6 @@ public:
 
       }
 
-      // Point optimization (removed)
-      //trackingPoints[1].resize(count);
 
       // Transfer local vector variable to global vector variable
       goodPointsVecTransfer = goodPointsVec;
@@ -290,8 +285,8 @@ public:
        	// Calculate displacement that the robot makes.
        	deltaPos = sqrt((deltaX*deltaX)+(deltaY*deltaY));
 
-        // Only calculate when 
-        if (deltaPos >= 0.5)
+        // Only calculate when
+        if (deltaPos >= 0.3)
         {
           // xDist calculation (How far is it from the object)
           xDist = (tan(aConstant*calculatePoints[0][goodPointsVecTransfer[i]].y + bConstant)*deltaPos)
@@ -308,8 +303,8 @@ public:
               + (dConstant*calculatePoints[0][goodPointsVecTransfer[i]].y) + eConstant) / 100)));
           }
 
-          // Print out the distance and height
-          if (xDist < 0 || xDist >= 15)
+          // Print out the distance and height This one print every point out.
+          /*if (xDist < 0 || xDist >= 15)
             cout << "Point " << goodPointsVecTransfer[i] << "(" << calculatePoints[0][goodPointsVecTransfer[i]].x << ","
             << calculatePoints[0][goodPointsVecTransfer[i]].y << ") " << " cannot be calculated. deltaPos is " << deltaPos << endl;
           else
@@ -324,14 +319,37 @@ public:
               cout << "Point " << goodPointsVecTransfer[i] << "(" << calculatePoints[0][goodPointsVecTransfer[i]].x << ","
                 << calculatePoints[0][goodPointsVecTransfer[i]].y << ") height is " << height << "m and it is " << xDist << "m  away. deltaPos is " << deltaPos << endl;
             }
+          }*/
+
+          // Hightlight the point that is risky and print out the information
+          int radius = 8;
+          int thickness = 2;
+          int lineType = 3;
+          if (trackingPoints[1][goodPointsVecTransfer[i]].x >= 240 && trackingPoints[1][goodPointsVecTransfer[i]].x <= 400)
+          {
+            if(trackingPoints[1][goodPointsVecTransfer[i]].y <= 140)
+            {
+              if (height <= 1.5 && xDistC <= 1.5)
+              {
+                // Highlight the point RED if it is dangerously close
+                circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 0, 255), thickness, lineType);
+                cout << "*DANGER: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDistC <<"m." << endl;
+              }
+              else if (height <= 1.5)
+              {
+                // Highlight the point ORANGE if it is risky.
+                circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 144, 255), thickness, lineType);
+                cout << "WARNING: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDistC <<"m." << endl;
+              }
+            }
           }
         }
       }
       // Add blank line to separate each iteration
       cout << "End of iteration" << endl;
 
-
-      calculateTrackpointFlag = false;
+      // Removed to make the calculation autonomous.
+      //calculateTrackpointFlag = false;
     }
 
     // Reset the tracking point
@@ -407,9 +425,9 @@ public:
     // ESC Check
     if (ch == 27)
   	  break;
-  	// Start Calaulation by pressing spacebar
+  	// Stop Calaulation by pressing spacebar
   	if (ch == 32)
-  	  calculateTrackpointFlag = true;
+  	  calculateTrackpointFlag = false;
   	// Clear all trackpoint by pressing 'c'
   	if (ch == 99)
   	  clearTrackingFlag = true;
