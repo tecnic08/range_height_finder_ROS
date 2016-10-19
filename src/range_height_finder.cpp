@@ -2,6 +2,7 @@
 #include <ros/ros.h>
 #include <std_msgs/Float32.h>
 #include <nav_msgs/Odometry.h>
+#include <sensor_msgs/JointState.h>
 #include <geometry_msgs/Twist.h>
 #include <tf/transform_datatypes.h>
 #include <image_transport/image_transport.h>
@@ -36,6 +37,10 @@ float cameraHeight = 0.312;
 float xDist, xDistC, height;
 vector<Point2f> locationOfInitiation;
 
+// Joint information array: used to decide whether to stop the calculation or not 
+// because the camera is not in horizontal position when robot is tilting.
+float jointPosition[4];
+
 // Distance Error Correction (Parabolic Equation) refer to excel file
 // [Error Percentage = cConstant y^2 + dConstant y +eConstant]
 // Turn this function on or off with the errorCompensation bool variable
@@ -56,13 +61,17 @@ int desiredY[5] = { 60,100,140,180,200 };
 
 // Declaring some flags
 bool pointTrackingFlag = true;
-bool calculateTrackpointFlag = true;
+bool calculateTrackpointFlag = false;
 bool clearTrackingFlag = false;
 bool recenterOffGridPointFlag = false;
+bool stopCalculationFlag = false;
 
 Point2f currentPoint;
+
+// Vector of grid location of tracking point that will be deployed.
 vector<Point2f> desiredPoint;
 
+// Index of point that is out of bound or invalid and needs to be recentered.
 vector<int> pointNeedsRecenter;
 
 class ImageConverter
@@ -72,6 +81,7 @@ class ImageConverter
   image_transport::Subscriber image_sub_;
   image_transport::Publisher image_pub_;
   ros::Subscriber subOdom;
+  ros::Subscriber subJoint;
   
 public:
   ImageConverter()
@@ -83,8 +93,9 @@ public:
     image_pub_ = it_.advertise("/image_converter/output_video", 1);
 
     subOdom = nh_.subscribe("/ypspur_ros/odom", 1, &ImageConverter::cbOdom,this);
+    subJoint = nh_.subscribe("/ypspur_ros/joint", 1, &ImageConverter::cbJoint,this);
 
-    cv::namedWindow(OPENCV_WINDOW);
+    //cv::namedWindow(OPENCV_WINDOW);
   }
 
   ~ImageConverter()
@@ -129,6 +140,23 @@ public:
 
   // Assign position from ROS nav msg to global variable
   currentPos = Point2f(odomErrorCorrection*(float)msg->pose.pose.position.x, odomErrorCorrection*(float)msg->pose.pose.position.y);
+}
+
+void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
+{
+  // Joint angle received
+  // Print out joint data
+  /*ROS_INFO("joint_angle: %0.3f, %0.3f, %0.3f, %0.3f\n", 
+      msg->position[0], msg->position[1], msg->position[2], msg->position[3]);
+  ROS_INFO("joint_vel: %0.3f, %0.3f, %0.3f, %0.3f\n", 
+      msg->velocity[0], msg->velocity[1], msg->velocity[2], msg->velocity[3]);*/
+
+  // Assign joint position from ROS nav msg to global variable
+  jointPosition[0] = msg->position[0];
+  jointPosition[1] = msg->position[1];
+  jointPosition[2] = msg->position[2];
+  jointPosition[3] = msg->position[3];
+
 }
 
   void spin()
@@ -214,6 +242,7 @@ public:
       stringstream bufferstring;
       string gg;
 
+      // loop to highlight the point and check the quality of point
       for (int i = 0; i < trackingPoints[1].size(); i++)
       {
         if (pointTrackingFlag)
@@ -256,7 +285,7 @@ public:
         bufferstring.str("");
         bufferstring << i;
         gg = bufferstring.str();
-        cv::putText(image, gg, Point(trackingPoints[1][i].x + 10,trackingPoints[1][i].y + 10), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255), 1, 1);
+        putText(image, gg, Point(trackingPoints[1][i].x + 10,trackingPoints[1][i].y + 10), CV_FONT_NORMAL, 0.5, Scalar(0, 0, 255), 1, 1);
 
         // Add goodPoints count and save the point index in goodPointsVec for calculation
         goodPoints++;
@@ -268,6 +297,26 @@ public:
       // Transfer local vector variable to global vector variable
       goodPointsVecTransfer = goodPointsVec;
     }
+      /* Joint check KENAF
+          _________
+         ||        ||
+         || 3    2 ||
+          |        |
+         || 0    1 ||
+         ||________||
+      */
+    // Check joint position if it is changing camera angle
+    if (jointPosition[0] < -2.95 || jointPosition[0] > 0.20)
+      calculateTrackpointFlag = false;
+    else if (jointPosition[1] > 2.95 || jointPosition[1] < -0.20)
+      calculateTrackpointFlag = false;
+    else if (jointPosition[2] < -2.85 || jointPosition[2] > 0.15)
+        calculateTrackpointFlag = false;
+    else if (jointPosition[3] > 2.85 || jointPosition[3] < -0.15)
+      calculateTrackpointFlag = false;
+    // Check for keyboard input to stop the calculation
+    else if (!stopCalculationFlag)
+      calculateTrackpointFlag = true;
 
     // Calculate the distance
     if (calculateTrackpointFlag)
@@ -349,7 +398,7 @@ public:
       cout << "End of iteration" << endl;
 
       // Removed to make the calculation autonomous.
-      //calculateTrackpointFlag = false;
+      calculateTrackpointFlag = false;
     }
 
     // Reset the tracking point
@@ -425,9 +474,9 @@ public:
     // ESC Check
     if (ch == 27)
   	  break;
-  	// Stop Calaulation by pressing spacebar
+  	// Start/stop Calaulation by pressing spacebar
   	if (ch == 32)
-  	  calculateTrackpointFlag = false;
+  	  stopCalculationFlag = !stopCalculationFlag;
   	// Clear all trackpoint by pressing 'c'
   	if (ch == 99)
   	  clearTrackingFlag = true;
