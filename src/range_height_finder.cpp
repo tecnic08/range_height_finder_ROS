@@ -11,8 +11,11 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/video/tracking.hpp>
+#include <opencv2/calib3d.hpp>
 #include <iostream>
 #include <math.h>
+
+float PI = 3.141592653589793;
 
 static const std::string OPENCV_WINDOW = "Image window";
 
@@ -20,12 +23,19 @@ using namespace cv;
 using namespace std;
 
 // Good Point border criteria
-int borderLeft = 120, borderRight = 520, borderLower = 210, borderUpper = 10;
+int borderLeft = 110, borderRight = 530, borderLower = 220, borderUpper = 75;
 
+// Camera verical axis calibration equation
 // Camera y pixel vs angle slope equation (Linear Equation) refer to excel file
 // [angle = Ay + B]
-float aConstant = -0.00305;
-float bConstant = 0.678;
+/*float aConstant = -0.00305;
+float bConstant = 0.678;*/
+float aConstant = -0.00400673;
+float bConstant = 0.97309;
+
+// Camera horizontal axis calibration equation
+float aHorizonConstant = 0.0051887;
+float bHorizonConstant = -1.695288;
 
 // deltaX is how far the camera has moved in X direction, deltaY is in Y direction, deltaPos is the displacement,
 // currentPos is where the robot now, cameraHeight is the height of the camera from the ground
@@ -34,7 +44,7 @@ float deltaY;
 float deltaPos;
 Point2f currentPos;
 float cameraHeight = 0.312;
-float xDist, xDistC, height;
+float xDist, xDistC, height, horizonAngle;
 vector<Point2f> locationOfInitiation;
 
 // Joint information array: used to decide whether to stop the calculation or not 
@@ -47,7 +57,7 @@ float jointPosition[4];
 float cConstant = 0.0025;
 float dConstant = -0.6445;
 float eConstant = 45.775;
-bool errorCompensation = true;
+bool errorCompensation = false;
 
 // Odometry Error Correction
 // A temporary workaround on the report of the odometry data from robot that is linearly inaccurate.
@@ -56,7 +66,14 @@ float odomErrorCorrection = 1;
 // Set the desired point grid
 // For 640x480
 int desiredX[9] = { 200,230,260,290,320,350,380,410,440 };
-int desiredY[5] = { 60,100,140,180,200 };
+int desiredY[5] = { 100,130,160,190,210 };
+
+// Camera calibration
+Mat cameraMatrix1 = (Mat_<double>(3,3) << 3.7562890829701979e+02, 0., 320.,
+    0., 3.7562890829701979e+02, 240.,
+    0., 0., 1.);
+    Mat distCoef1 = (Mat_<double>(5,1) << -3.7568807123087655e-01, 1.4804966706210765e-01, 0., 0.,
+    -2.6655460202595321e-02);
 
 
 // Declaring some flags
@@ -193,7 +210,9 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
   string windowName = "Height and Range finder";
   namedWindow(windowName, 1);
 
-  Mat prevGrayImage, curGrayImage, image, frame;
+  Mat prevGrayImage, curGrayImage, image, frame, originalDistortedFrame;
+  Mat map1, map2;
+  Size imageSize;
   // trackingPoints is the current point.
   vector<Point2f> trackingPoints[2];
   // calculatePoints is the previous point data that will be used for calculation
@@ -211,11 +230,20 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       ros::spinOnce();
       // my code here
 
-    cap >> frame;
+    cap >> originalDistortedFrame;
 
-    if (frame.empty())
+    if (originalDistortedFrame.empty())
       break;
 
+    imageSize = originalDistortedFrame.size();
+
+    initUndistortRectifyMap(
+                cameraMatrix1, distCoef1, Mat(),
+                getOptimalNewCameraMatrix(cameraMatrix1, distCoef1, imageSize, 1, imageSize, 0), imageSize,
+                CV_16SC2, map1, map2);
+
+    remap(originalDistortedFrame, frame, map1, map2, INTER_LINEAR);
+    
     resize(frame, frame, Size(), scalingFactor, scalingFactor, INTER_AREA);
 
     frame.copyTo(image);
@@ -342,8 +370,11 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
             / (tan(aConstant*trackingPoints[1][goodPointsVecTransfer[i]].y + bConstant)
               - tan(aConstant*calculatePoints[0][goodPointsVecTransfer[i]].y + bConstant));
 
+          horizonAngle = (360*((aHorizonConstant*trackingPoints[0][goodPointsVecTransfer[i]].x)+bHorizonConstant))/(2*PI);
+
           // height calculation (How high is the object)
           height = xDist*tan(aConstant*trackingPoints[1][goodPointsVecTransfer[i]].y + bConstant) + cameraHeight;
+
 
           if (errorCompensation)
           {
@@ -370,25 +401,29 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
             }
           }*/
 
+          // Miscalculation check.
+          if (height <= 0 || xDist <= 0)
+              continue;
+
           // Hightlight the point that is risky and print out the information
           int radius = 8;
           int thickness = 2;
           int lineType = 3;
-          if (trackingPoints[1][goodPointsVecTransfer[i]].x >= 240 && trackingPoints[1][goodPointsVecTransfer[i]].x <= 400)
+          if (trackingPoints[1][goodPointsVecTransfer[i]].x >= 200 && trackingPoints[1][goodPointsVecTransfer[i]].x <= 440)
           {
-            if(trackingPoints[1][goodPointsVecTransfer[i]].y <= 140)
+            if(trackingPoints[1][goodPointsVecTransfer[i]].y <= 160)
             {
-              if (height <= 1.5 && xDistC <= 1.5)
+              if (height <= 1.00 && xDistC <= 1.5)
               {
                 // Highlight the point RED if it is dangerously close
                 circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 0, 255), thickness, lineType);
-                cout << "*DANGER: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDistC <<"m." << endl;
+                cout << "*DANGER: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDist <<"m. Angle is " << horizonAngle << endl;
               }
-              else if (height <= 1.5)
+              else if (height <= 1.0)
               {
                 // Highlight the point ORANGE if it is risky.
                 circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 144, 255), thickness, lineType);
-                cout << "WARNING: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDistC <<"m." << endl;
+                cout << "WARNING: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDist <<"m. Angle is " << horizonAngle << endl;
               }
             }
           }
@@ -404,14 +439,15 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
     // Reset the tracking point
     if (clearTrackingFlag)
     {
-            // Turn off recentering otherwise segmentation fault will occur
-            recenterOffGridPointFlag = false;
+      // Turn off recentering otherwise segmentation fault will occur
+      recenterOffGridPointFlag = false;
 
       trackingPoints[0].clear();
       trackingPoints[1].clear();
       calculatePoints[0].clear();
       calculatePoints[1].clear();
       goodPointsVecTransfer.clear();
+      locationOfInitiation.clear();
 
       clearTrackingFlag = false;
     }
