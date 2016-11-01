@@ -86,7 +86,6 @@ bool pointTrackingFlag = true;
 bool calculateTrackpointFlag = false;
 bool clearTrackingFlag = false;
 bool recenterOffGridPointFlag = false;
-bool reinitializePointFlag = false;
 bool stopCalculationFlag = false;
 
 Point2f currentPoint;
@@ -376,11 +375,13 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
         {
           if (currentLinearMotion < -0.005)
          {
+            // If the vector is empty, push the index of the point in.
             if (calculateWithBackwardMotion.empty())
             {
               calculateWithBackwardMotion.push_back(goodPointsVecTransfer[i]);
               cout << "First point added to backward motion" << endl;
             }
+            // If not empty, check that this index is not duplicated.
             else
             {
               // Check if the point is already in the vector
@@ -392,7 +393,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
                   break;
                 }
                 else
-                  addToBackwardMotionVector = true;              
+                  addToBackwardMotionVector = true;
               }
             }
           }
@@ -412,7 +413,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
             }
           }
         }
-
+        // If it passed all criteria, time to push the index into the vector
         if (addToBackwardMotionVector)
         {
           calculateWithBackwardMotion.push_back(goodPointsVecTransfer[i]);
@@ -587,12 +588,6 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       if (pointNeedsRecenter.empty())
             recenterOffGridPointFlag = false;
     }
-
-    if (reinitializePointFlag)
-    {
-
-    }
-
 
     imshow(windowName, image);
 
