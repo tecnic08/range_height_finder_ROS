@@ -1,17 +1,19 @@
-#include <ros/ros.h>
+// ROS Header
 #include <ros/ros.h>
 #include <std_msgs/Float32.h>
 #include <nav_msgs/Odometry.h>
 #include <sensor_msgs/JointState.h>
+#include <sensor_msgs/image_encodings.h>
 #include <geometry_msgs/Twist.h>
 #include <tf/transform_datatypes.h>
 #include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
-#include <sensor_msgs/image_encodings.h>
+// OpenCV Header
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/video/tracking.hpp>
 #include <opencv2/calib3d.hpp>
+// Standard C++ Header
 #include <iostream>
 #include <math.h>
 
@@ -24,6 +26,9 @@ using namespace std;
 
 // Good Point border criteria
 int borderLeft = 110, borderRight = 530, borderLower = 220, borderUpper = 75;
+
+// Warning, Danger trigger border criteria
+int triggerBorderLeft = 200, triggerBorderRight = 440, triggerBorderLower = 160, triggerBorderUpper = 70;
 
 // Camera verical axis calibration equation
 // Camera y pixel vs angle slope equation (Linear Equation) refer to excel file
@@ -68,8 +73,16 @@ float odomErrorCorrection = 1;
 
 // Set the desired point grid
 // For 640x480
-int desiredX[9] = { 200,230,260,290,320,350,380,410,440 };
+//int desiredX[9] = { 200,230,260,290,320,350,380,410,440 };
+//int desiredY[5] = { 100,130,160,190,210 };
+
+int desiredX[13] = { 140,170,200,230,260,290,320,350,380,410,440,470,500 };
 int desiredY[5] = { 100,130,160,190,210 };
+
+// Point accumulation check
+vector<int> pointAccumulationCheckIndex[6][3];
+int zoneBorderHorizontal[7] = {110,180,250,320,390,460,531};
+int zoneBorderVertical[4] = {70,120,170,221};
 
 // Camera calibration
 Mat cameraMatrix1 = (Mat_<double>(3,3) << 3.7562890829701979e+02, 0., 320.,
@@ -77,9 +90,6 @@ Mat cameraMatrix1 = (Mat_<double>(3,3) << 3.7562890829701979e+02, 0., 320.,
     0., 0., 1.);
     Mat distCoef1 = (Mat_<double>(5,1) << -3.7568807123087655e-01, 1.4804966706210765e-01, 0., 0.,
     -2.6655460202595321e-02);
-
-// Variable for reinitializing a point when switching from backward motion to forward motion.
-int reinitializePointIndex;
 
 // Declaring some flags
 bool pointTrackingFlag = true;
@@ -197,7 +207,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
   }
 
   // Push desired (x,y) in vector of desiredPoint
-  for (int i = 0; i < 9; i++)
+  for (int i = 0; i < 13; i++)
   {
     for (int j = 0; j < 5; j++)
     {
@@ -211,7 +221,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
   Size windowSize(25, 25);
 
   // Max number of points
-  const int maxNumPoints = 45;
+  const int maxNumPoints = 65;
 
   string windowName = "Height and Range finder";
   namedWindow(windowName, 1);
@@ -241,8 +251,10 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
     if (originalDistortedFrame.empty())
       break;
 
+    // Get input frame size for undistortion
     imageSize = originalDistortedFrame.size();
 
+    // Undistort the input image without cropping
     initUndistortRectifyMap(
                 cameraMatrix1, distCoef1, Mat(),
                 getOptimalNewCameraMatrix(cameraMatrix1, distCoef1, imageSize, 1, imageSize, 0), imageSize,
@@ -250,6 +262,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
 
     remap(originalDistortedFrame, frame, map1, map2, INTER_LINEAR);
     
+    // Resize the frame if needed
     resize(frame, frame, Size(), scalingFactor, scalingFactor, INTER_AREA);
 
     frame.copyTo(image);
@@ -370,6 +383,8 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
        	// Calculate displacement that the robot makes.
        	deltaPos = sqrt((deltaX*deltaX)+(deltaY*deltaY));
 
+        //deltaPos = norm(currentPos - locationOfInitiation[goodPointsVecTransfer[i]]);
+
         // Push index of point that needs to be calculated as backward motion into a vector.
         if (deltaPos >= 0.29 && deltaPos <= 0.3)
         {
@@ -379,7 +394,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
             if (calculateWithBackwardMotion.empty())
             {
               calculateWithBackwardMotion.push_back(goodPointsVecTransfer[i]);
-              cout << "First point added to backward motion" << endl;
+              //cout << "First point added to backward motion" << endl;
             }
             // If not empty, check that this index is not duplicated.
             else
@@ -407,7 +422,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
                 if (calculateWithBackwardMotion[k] == goodPointsVecTransfer[i])
                 {
                   calculateWithBackwardMotion.erase(calculateWithBackwardMotion.begin() + k);
-                  cout << "Point changed to forward motion " << goodPointsVecTransfer[i] << endl;
+                  //cout << "Point changed to forward motion " << goodPointsVecTransfer[i] << endl;
                 }
               }
             }
@@ -418,10 +433,28 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
         {
           calculateWithBackwardMotion.push_back(goodPointsVecTransfer[i]);
           addToBackwardMotionVector = false;
-          cout << "Added to backward motion [" << goodPointsVecTransfer[i] << "]" << endl;
-        }  
+          //cout << "Added to backward motion [" << goodPointsVecTransfer[i] << "]" << endl;
+        } 
 
-        // Only calculate when
+        // Point Accumulation Check by categorize point into zone.
+        for (int d = 0; d < 6; d++)
+        {
+          if (trackingPoints[1][goodPointsVecTransfer[i]].x >= zoneBorderHorizontal[d]
+              && trackingPoints[1][goodPointsVecTransfer[i]].x < zoneBorderHorizontal[d+1])
+          {
+            for (int e = 0; e < 3; e++)
+            {
+              if (trackingPoints[1][goodPointsVecTransfer[i]].y >= zoneBorderVertical[e]
+              && trackingPoints[1][goodPointsVecTransfer[i]].y < zoneBorderVertical[e+1])
+              {
+                pointAccumulationCheckIndex[d][e].push_back(goodPointsVecTransfer[i]);
+                break;
+              }
+            } 
+          }
+        }
+
+        // Calculation Part
         if (deltaPos >= 0.3)
         {
           int radius = 5;
@@ -482,9 +515,9 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
           radius = 8;
           thickness = 2;
           lineType = 3;
-          if (trackingPoints[1][goodPointsVecTransfer[i]].x >= 200 && trackingPoints[1][goodPointsVecTransfer[i]].x <= 440)
+          if (trackingPoints[1][goodPointsVecTransfer[i]].x >= triggerBorderLeft && trackingPoints[1][goodPointsVecTransfer[i]].x <= triggerBorderRight)
           {
-            if(trackingPoints[1][goodPointsVecTransfer[i]].y <= 160)
+            if(trackingPoints[1][goodPointsVecTransfer[i]].y <= triggerBorderLower && trackingPoints[1][goodPointsVecTransfer[i]].y >= triggerBorderUpper)
             {
               if (height <= 1.00 && xDistC <= 1.5)
               {
@@ -502,7 +535,25 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
           }
         }
       }
-      // Add blank line to separate each iteration
+
+      // Check if point accumulation policy is being violated
+      for (int d = 0; d < 6; d++)
+      {
+        for (int e = 0; e < 3; e++)
+        {
+          if (pointAccumulationCheckIndex[d][e].size() >= 10)
+          {
+            for (int f = 0; f < pointAccumulationCheckIndex[d][e].size(); f++)
+            {
+              pointNeedsRecenter.push_back(pointAccumulationCheckIndex[d][e][f]);
+            }
+            recenterOffGridPointFlag = true;
+          }
+          pointAccumulationCheckIndex[d][e].clear();
+        }
+      }
+
+      // Add a line to separate each iteration
       cout << "End of iteration" << endl;
 
       // Remove to make the calculation autonomous.
@@ -523,6 +574,14 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       locationOfInitiation.clear();
       calculateWithBackwardMotion.clear();
       addToBackwardMotionVector = false;
+
+      for (int d = 0; d < 6; d++)
+      {
+        for (int e = 0; e < 3; e++)
+        {
+          pointAccumulationCheckIndex[d][e].clear();
+        }
+      }
 
       clearTrackingFlag = false;
     }
@@ -574,7 +633,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
             if (pointNeedsRecenter[k] == calculateWithBackwardMotion[b])
             {
               calculateWithBackwardMotion.erase(calculateWithBackwardMotion.begin() + b);
-              cout << "Removed from backward motion" << pointNeedsRecenter[k] << endl;
+              //cout << "Removed from backward motion" << pointNeedsRecenter[k] << endl;
             }
           }
 
