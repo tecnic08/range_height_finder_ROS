@@ -59,13 +59,14 @@ bool addToBackwardMotionVector = false;
 // because the camera is not in horizontal position when robot is tilting.
 float jointPosition[4];
 
-// Distance Error Correction (Parabolic Equation) refer to excel file
+// Distance Error Correction !!REMOVED!! (Parabolic Equation) refer to excel file
 // [Error Percentage = cConstant y^2 + dConstant y +eConstant]
 // Turn this function on or off with the errorCompensation bool variable
+/*
 float cConstant = 0.0025;
 float dConstant = -0.6445;
 float eConstant = 45.775;
-bool errorCompensation = false;
+bool errorCompensation = false;*/
 
 // Odometry Error Correction
 // A temporary workaround on the report of the odometry data from robot that is linearly inaccurate.
@@ -73,9 +74,6 @@ float odomErrorCorrection = 1;
 
 // Set the desired point grid
 // For 640x480
-//int desiredX[9] = { 200,230,260,290,320,350,380,410,440 };
-//int desiredY[5] = { 100,130,160,190,210 };
-
 int desiredX[13] = { 140,170,200,230,260,290,320,350,380,410,440,470,500 };
 int desiredY[5] = { 100,130,160,190,210 };
 
@@ -84,7 +82,7 @@ vector<int> pointAccumulationCheckIndex[6][3];
 int zoneBorderHorizontal[7] = {110,180,250,320,390,460,531};
 int zoneBorderVertical[4] = {70,120,170,221};
 
-// Camera calibration
+// Camera calibration for undistortion
 Mat cameraMatrix1 = (Mat_<double>(3,3) << 3.7562890829701979e+02, 0., 320.,
     0., 3.7562890829701979e+02, 240.,
     0., 0., 1.);
@@ -482,12 +480,13 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
           // height calculation (How high is the object)
           height = xDist*tan(aConstant*trackingPoints[1][goodPointsVecTransfer[i]].y + bConstant) + cameraHeight;
 
-          if (errorCompensation)
+          // Error compensation (removed because image is already undistorted)
+          /*if (errorCompensation)
           {
             // xDist error compensation
             xDistC = xDist - abs((xDist*(((cConstant*calculatePoints[0][goodPointsVecTransfer[i]].y*calculatePoints[0][goodPointsVecTransfer[i]].y)
               + (dConstant*calculatePoints[0][goodPointsVecTransfer[i]].y) + eConstant) / 100)));
-          }
+          }*/
 
           // Print out the distance and height This one print every point out.
           /*if (xDist < 0 || xDist >= 15)
@@ -519,7 +518,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
           {
             if(trackingPoints[1][goodPointsVecTransfer[i]].y <= triggerBorderLower && trackingPoints[1][goodPointsVecTransfer[i]].y >= triggerBorderUpper)
             {
-              if (height <= 1.00 && xDistC <= 1.5)
+              if (height <= 1.00 && xDistC <= 1.0)
               {
                 // Highlight the point RED if it is dangerously close
                 circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 0, 255), thickness, lineType);
