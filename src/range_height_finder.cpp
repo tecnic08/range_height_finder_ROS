@@ -518,13 +518,13 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
           {
             if(trackingPoints[1][goodPointsVecTransfer[i]].y <= triggerBorderLower && trackingPoints[1][goodPointsVecTransfer[i]].y >= triggerBorderUpper)
             {
-              if (height <= 1.00 && xDistC <= 1.0)
+              if (height <= 1.00 && xDist <= 0.5)
               {
                 // Highlight the point RED if it is dangerously close
                 circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 0, 255), thickness, lineType);
                 cout << "*DANGER: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDist <<"m. Angle is " << horizonAngle << endl;
               }
-              else if (height <= 1.0)
+              else if (height <= 1.0 && xDist <= 1.0)
               {
                 // Highlight the point ORANGE if it is risky.
                 circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 144, 255), thickness, lineType);
