@@ -59,7 +59,6 @@ bool addToBackwardMotionVector = false;
 // because the camera is not in horizontal position when robot is tilting.
 float jointPosition[4];
 bool jointWarning = false;
-bool jointCheck;
 
 // Distance Error Correction !!REMOVED!! (Parabolic Equation) refer to excel file
 // [Error Percentage = cConstant y^2 + dConstant y +eConstant]
@@ -363,8 +362,6 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       */
     jointWarning = false;
     // Check joint position if it is changing camera angle
-    if (jointCheck)
-    {
     if (jointPosition[0] < -2.95 || jointPosition[0] > 0.20)
       {
         calculateTrackpointFlag = false;
@@ -385,10 +382,8 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
         calculateTrackpointFlag = false;
         jointWarning = true;
       }
-    }
-
     // Check for keyboard input to stop the calculation
-    if (!stopCalculationFlag)
+    else if (!stopCalculationFlag)
       calculateTrackpointFlag = true;
 
     // Show that the calculation is stopped.
