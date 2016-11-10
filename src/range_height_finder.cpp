@@ -58,6 +58,8 @@ bool addToBackwardMotionVector = false;
 // Joint information array: used to decide whether to stop the calculation or not 
 // because the camera is not in horizontal position when robot is tilting.
 float jointPosition[4];
+bool jointWarning = false;
+bool jointCheck;
 
 // Distance Error Correction !!REMOVED!! (Parabolic Equation) refer to excel file
 // [Error Percentage = cConstant y^2 + dConstant y +eConstant]
@@ -95,6 +97,10 @@ bool calculateTrackpointFlag = false;
 bool clearTrackingFlag = false;
 bool recenterOffGridPointFlag = false;
 bool stopCalculationFlag = false;
+
+// Cosmetic Variable
+int lineCosmeticCounter = -1;
+bool thereIsAPreviousLine = false;
 
 Point2f currentPoint;
 
@@ -267,6 +273,10 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
 
     cvtColor(image, curGrayImage, COLOR_BGR2GRAY);
 
+    // Draw outline of ROI and trigger zone
+    rectangle (image, Point(borderLeft,borderUpper), Point(borderRight,borderLower), Scalar(0,255,0), 1, 8);
+    rectangle (image, Point(triggerBorderLeft,triggerBorderUpper), Point(triggerBorderRight,triggerBorderLower), Scalar(0,0,255), 1, 8);
+
     if (!trackingPoints[0].empty())
     {
       vector<uchar> statusVector;
@@ -351,22 +361,80 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
          || 0    1 ||
          ||________||
       */
+    jointWarning = false;
     // Check joint position if it is changing camera angle
+    if (jointCheck)
+    {
     if (jointPosition[0] < -2.95 || jointPosition[0] > 0.20)
-      calculateTrackpointFlag = false;
-    else if (jointPosition[1] > 2.95 || jointPosition[1] < -0.20)
-      calculateTrackpointFlag = false;
-    else if (jointPosition[2] < -2.85 || jointPosition[2] > 0.15)
+      {
         calculateTrackpointFlag = false;
+        jointWarning = true;
+      }
+    else if (jointPosition[1] > 2.95 || jointPosition[1] < -0.20)
+      {
+        calculateTrackpointFlag = false;
+        jointWarning = true;
+      }
+    else if (jointPosition[2] < -2.85 || jointPosition[2] > 0.15)
+      {
+        calculateTrackpointFlag = false;
+        jointWarning = true;
+      }
     else if (jointPosition[3] > 2.85 || jointPosition[3] < -0.15)
-      calculateTrackpointFlag = false;
+      {
+        calculateTrackpointFlag = false;
+        jointWarning = true;
+      }
+    }
+
     // Check for keyboard input to stop the calculation
-    else if (!stopCalculationFlag)
+    if (!stopCalculationFlag)
       calculateTrackpointFlag = true;
+
+    // Show that the calculation is stopped.
+    if (!calculateTrackpointFlag)
+    {
+      if (jointWarning)
+        cout << "\r[==CHECK JOINTS POS==]";
+      else
+        cout << "\r[==SCANNING  PAUSED==]";
+    }
 
     // Calculate the distance
     if (calculateTrackpointFlag)
     {
+      if (!goodPointsVecTransfer.empty())
+      {
+      // Add scanning text.
+      if (lineCosmeticCounter == 1)
+        cout << "\rScanning [X=========]";
+      else if (lineCosmeticCounter == 2)
+        cout << "\rScanning [=X========]";
+      else if (lineCosmeticCounter == 3)
+        cout << "\rScanning [==X=======]";
+      else if (lineCosmeticCounter == 4)
+        cout << "\rScanning [===X======]";
+      else if (lineCosmeticCounter == 5)
+        cout << "\rScanning [====X=====]";
+      else if (lineCosmeticCounter == 6)
+        cout << "\rScanning [=====X====]";
+      else if (lineCosmeticCounter == 7)
+        cout << "\rScanning [======X===]";
+      else if (lineCosmeticCounter == 8)
+        cout << "\rScanning [=======X==]";
+      else if (lineCosmeticCounter == 9)
+        cout << "\rScanning [========X=]";
+      else if (lineCosmeticCounter == 10)
+        {
+          cout << "\rScanning [=========X]";
+          lineCosmeticCounter = 0;
+        }
+      lineCosmeticCounter++;
+      thereIsAPreviousLine = false;
+      }
+      else
+        cout << "\rScanning [NO TRK PTS]";
+
       // Set float point decimal point
       std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
       std::cout.precision(2);
@@ -520,15 +588,21 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
             {
               if (height <= 1.00 && xDist <= 0.5)
               {
+                if (!thereIsAPreviousLine)
+                  cout << endl;
                 // Highlight the point RED if it is dangerously close
                 circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 0, 255), thickness, lineType);
                 cout << "*DANGER: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDist <<"m. Angle is " << horizonAngle << endl;
+                thereIsAPreviousLine = true;
               }
               else if (height <= 1.0 && xDist <= 1.0)
               {
+                if (!thereIsAPreviousLine)
+                  cout << endl;
                 // Highlight the point ORANGE if it is risky.
                 circle(image, trackingPoints[1][goodPointsVecTransfer[i]], radius, Scalar(0, 144, 255), thickness, lineType);
                 cout << "WARNING: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDist <<"m. Angle is " << horizonAngle << endl;
+                thereIsAPreviousLine = true;
               }
             }
           }
@@ -551,11 +625,6 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
           pointAccumulationCheckIndex[d][e].clear();
         }
       }
-
-      // Add a line to separate each iteration
-      cout << "End of iteration" << endl;
-
-      // Remove to make the calculation autonomous.
       calculateTrackpointFlag = false;
     }
 
@@ -583,6 +652,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       }
 
       clearTrackingFlag = false;
+      cout << "\nTracking Point Cleared!" << endl;
     }
 
     // Refining the location of the feature points
@@ -602,6 +672,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       }
 
       pointTrackingFlag = false;
+      cout << "\nTracking Point Deployed!" << endl;
     }
 
     // Tracking point is bad or moved away from border, reset that point.
@@ -652,7 +723,10 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
     char ch = waitKey(10);
     // ESC Check
     if (ch == 27)
-  	  break;
+      { 
+        cout << "\rESC Key pressed, Exiting." << endl;;
+  	    break;
+      }
   	// Start/stop Calaulation by pressing spacebar
   	if (ch == 32)
   	  stopCalculationFlag = !stopCalculationFlag;
