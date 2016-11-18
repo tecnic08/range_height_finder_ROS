@@ -28,7 +28,7 @@ using namespace std;
 int borderLeft = 110, borderRight = 530, borderLower = 220, borderUpper = 75;
 
 // Warning, Danger trigger border criteria
-int triggerBorderLeft = 200, triggerBorderRight = 440, triggerBorderLower = 160, triggerBorderUpper = 70;
+int triggerBorderLeft = 250, triggerBorderRight = 390, triggerBorderLower = 160, triggerBorderUpper = 70;
 
 // Camera verical axis calibration equation
 // Camera y pixel vs angle slope equation (Linear Equation) refer to excel file
@@ -101,8 +101,6 @@ bool stopCalculationFlag = false;
 int lineCosmeticCounter = -1;
 bool thereIsAPreviousLine = false;
 
-Point2f currentPoint;
-
 // Vector of grid location of tracking point that will be deployed.
 vector<Point2f> desiredPoint;
 
@@ -125,7 +123,7 @@ public:
     // Subscrive to input video feed and publish output video feed
     /*image_sub_ = it_.subscribe("/camera/image_raw", 1, 
       &ImageConverter::imageCb, this);*/
-    image_pub_ = it_.advertise("/image_converter/output_video", 1);
+    //image_pub_ = it_.advertise("/image_converter/output_video", 1);
 
     subOdom = nh_.subscribe("/ypspur_ros/odom", 1, &ImageConverter::cbOdom,this);
     subJoint = nh_.subscribe("/ypspur_ros/joint", 1, &ImageConverter::cbJoint,this);
@@ -133,10 +131,10 @@ public:
     //cv::namedWindow(OPENCV_WINDOW);
   }
 
-  ~ImageConverter()
+  /*~ImageConverter()
   {
     cv::destroyWindow(OPENCV_WINDOW);
-  }
+  }*/
 
   /*void imageCb(const sensor_msgs::ImageConstPtr& msg)
   {
@@ -299,15 +297,6 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       // loop to highlight the point and check the quality of point
       for (int i = 0; i < trackingPoints[1].size(); i++)
       {
-        if (pointTrackingFlag)
-        { // Check if new point are too close.
-          if (norm(currentPoint - trackingPoints[1][i]) <= minDist)
-          {
-            pointTrackingFlag = false;
-            continue;
-          }
-        }
-
         // Check if the status vector is good if not, skip the code below
         if (!statusVector[i])
         {
