@@ -2,7 +2,7 @@
 #include <ros/ros.h>
 #include <std_msgs/Float32.h>
 #include <nav_msgs/Odometry.h>
-#include <sensor_msgs/JointState.h>
+#include <sensor_msgs/Imu.h>
 #include <sensor_msgs/image_encodings.h>
 #include <geometry_msgs/Twist.h>
 #include <tf/transform_datatypes.h>
@@ -25,10 +25,10 @@ using namespace cv;
 using namespace std;
 
 // Good Point border criteria
-int borderLeft = 110, borderRight = 530, borderLower = 220, borderUpper = 75;
+int borderLeft = 110, borderRight = 530, borderLower = 220, borderUpper = 74;
 
 // Warning, Danger trigger border criteria
-int triggerBorderLeft = 250, triggerBorderRight = 390, triggerBorderLower = 160, triggerBorderUpper = 70;
+int triggerBorderLeft = 250, triggerBorderRight = 390, triggerBorderLower = 160, triggerBorderUpper = 74;
 
 // Camera verical axis calibration equation
 // Camera y pixel vs angle slope equation (Linear Equation) refer to excel file
@@ -55,10 +55,12 @@ vector<Point2f> locationOfInitiation;
 vector<int> calculateWithBackwardMotion;
 bool addToBackwardMotionVector = false;
 
-// Joint information array: used to decide whether to stop the calculation or not 
+// Pitch and roll check with IMU data used to decide whether to stop the calculation or not 
 // because the camera is not in horizontal position when robot is tilting.
-float jointPosition[4];
-bool jointWarning = false;
+float imuPitchLimit = 0.0095;
+float imuRollLimit = 0.0095;
+float imuPitch, imuRoll;
+bool pitchRollWarning;
 
 // Distance Error Correction !!REMOVED!! (Parabolic Equation) refer to excel file
 // [Error Percentage = cConstant y^2 + dConstant y +eConstant]
@@ -111,86 +113,31 @@ class ImageConverter
 {
   ros::NodeHandle nh_;
   image_transport::ImageTransport it_;
-  image_transport::Subscriber image_sub_;
-  image_transport::Publisher image_pub_;
+  //image_transport::Subscriber image_sub_;
+  //image_transport::Publisher image_pub_;
   ros::Subscriber subOdom;
-  ros::Subscriber subJoint;
+  ros::Subscriber imuData;
   
 public:
   ImageConverter()
     : it_(nh_)
   {
-    // Subscrive to input video feed and publish output video feed
-    /*image_sub_ = it_.subscribe("/camera/image_raw", 1, 
-      &ImageConverter::imageCb, this);*/
-    //image_pub_ = it_.advertise("/image_converter/output_video", 1);
-
     subOdom = nh_.subscribe("/ypspur_ros/odom", 1, &ImageConverter::cbOdom,this);
-    subJoint = nh_.subscribe("/ypspur_ros/joint", 1, &ImageConverter::cbJoint,this);
-
-    //cv::namedWindow(OPENCV_WINDOW);
+    imuData = nh_.subscribe("/imu/data", 1, &ImageConverter::cbImu,this);
   }
-
-  /*~ImageConverter()
-  {
-    cv::destroyWindow(OPENCV_WINDOW);
-  }*/
-
-  /*void imageCb(const sensor_msgs::ImageConstPtr& msg)
-  {
-    cv_bridge::CvImagePtr cv_ptr;
-    try
-    {
-      cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::BGR8);
-    }
-    catch (cv_bridge::Exception& e)
-    {
-      ROS_ERROR("cv_bridge exception: %s", e.what());
-      return;
-    }
-
-    // Draw an example circle on the video stream
-    if (cv_ptr->image.rows > 60 && cv_ptr->image.cols > 60)
-      cv::circle(cv_ptr->image, cv::Point(50, 50), 10, CV_RGB(255,0,0));
-
-    // Update GUI Window
-    cv::imshow(OPENCV_WINDOW, cv_ptr->image);
-    cv::waitKey(3);
-    
-    // Output modified video stream
-    image_pub_.publish(cv_ptr->toImageMsg());
-  }*/
 
   void cbOdom(const nav_msgs::Odometry::ConstPtr &msg)
 {
-  // Odometry data received
-  // Print out odometry data
-  /*ROS_INFO("vel: %0.3f, ang_vel: %0.3f\n", msg->twist.twist.linear.x, msg->twist.twist.angular.z);
-  ROS_INFO("odometry (x, y, yaw): (%0.3f, %0.3f, %0.3f)\n", 
-      msg->pose.pose.position.x,
-      msg->pose.pose.position.y,
-      (float)tf::getYaw(msg->pose.pose.orientation));*/
-
   // Assign position from ROS nav msg to global variable
   currentPos = Point2f(odomErrorCorrection*(float)msg->pose.pose.position.x, odomErrorCorrection*(float)msg->pose.pose.position.y);
   currentLinearMotion = (float)msg->twist.twist.linear.x;
 }
 
-void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
+void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
 {
-  // Joint angle received
-  // Print out joint data
-  /*ROS_INFO("joint_angle: %0.3f, %0.3f, %0.3f, %0.3f\n", 
-      msg->position[0], msg->position[1], msg->position[2], msg->position[3]);
-  ROS_INFO("joint_vel: %0.3f, %0.3f, %0.3f, %0.3f\n", 
-      msg->velocity[0], msg->velocity[1], msg->velocity[2], msg->velocity[3]);*/
-
-  // Assign joint position from ROS nav msg to global variable
-  jointPosition[0] = msg->position[0];
-  jointPosition[1] = msg->position[1];
-  jointPosition[2] = msg->position[2];
-  jointPosition[3] = msg->position[3];
-
+  // Assign IMU data from sensor msg to global variable
+  imuPitch = msg->orientation.y;
+  imuRoll = msg->orientation.x;
 }
 
   void spin()
@@ -341,35 +288,18 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       // Transfer local vector variable to global vector variable
       goodPointsVecTransfer = goodPointsVec;
     }
-      /* Joint check KENAF
-          _________
-         ||        ||
-         || 3    2 ||
-          |        |
-         || 0    1 ||
-         ||________||
-      */
-    jointWarning = false;
-    // Check joint position if it is changing camera angle
-    if (jointPosition[0] < -2.95 || jointPosition[0] > 0.20)
+
+    pitchRollWarning = false;
+    // Check pitch and roll if it is changing camera angle
+    if (imuPitch > imuPitchLimit)
       {
         calculateTrackpointFlag = false;
-        jointWarning = true;
+        pitchRollWarning = true;
       }
-    else if (jointPosition[1] > 2.95 || jointPosition[1] < -0.20)
+    else if (imuRoll > imuRollLimit)
       {
         calculateTrackpointFlag = false;
-        jointWarning = true;
-      }
-    else if (jointPosition[2] < -2.85 || jointPosition[2] > 0.15)
-      {
-        calculateTrackpointFlag = false;
-        jointWarning = true;
-      }
-    else if (jointPosition[3] > 2.85 || jointPosition[3] < -0.15)
-      {
-        calculateTrackpointFlag = false;
-        jointWarning = true;
+        pitchRollWarning = true;
       }
     // Check for keyboard input to stop the calculation
     else if (!stopCalculationFlag)
@@ -378,8 +308,8 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
     // Show that the calculation is stopped.
     if (!calculateTrackpointFlag)
     {
-      if (jointWarning)
-        cout << "\r[==CHECK JOINTS POS==]";
+      if (pitchRollWarning)
+        cout << "\r[==CHECK PITCH/ROLL==]";
       else
         cout << "\r[==SCANNING  PAUSED==]";
     }
@@ -428,10 +358,10 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
       {
         // Get deltaX and delta Y.
         deltaX = (float)currentPos.x - (float)locationOfInitiation[goodPointsVecTransfer[i]].x;
-       	deltaY = (float)currentPos.y - (float)locationOfInitiation[goodPointsVecTransfer[i]].y;
+        deltaY = (float)currentPos.y - (float)locationOfInitiation[goodPointsVecTransfer[i]].y;
 
-       	// Calculate displacement that the robot makes.
-       	deltaPos = sqrt((deltaX*deltaX)+(deltaY*deltaY));
+        // Calculate displacement that the robot makes.
+        deltaPos = sqrt((deltaX*deltaX)+(deltaY*deltaY));
 
         //deltaPos = norm(currentPos - locationOfInitiation[goodPointsVecTransfer[i]]);
 
@@ -570,7 +500,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
           {
             if(trackingPoints[1][goodPointsVecTransfer[i]].y <= triggerBorderLower && trackingPoints[1][goodPointsVecTransfer[i]].y >= triggerBorderUpper)
             {
-              if (height <= 1.00 && xDist <= 0.5)
+              if (height <= 1.2 && xDist <= 0.5)
               {
                 if (!thereIsAPreviousLine)
                   cout << endl;
@@ -579,7 +509,7 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
                 cout << "*DANGER: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDist <<"m. Angle is " << horizonAngle << endl;
                 thereIsAPreviousLine = true;
               }
-              else if (height <= 1.0 && xDist <= 1.0)
+              else if (height <= 1.2 && xDist <= 1.0)
               {
                 if (!thereIsAPreviousLine)
                   cout << endl;
@@ -709,20 +639,20 @@ void cbJoint(const sensor_msgs::JointState::ConstPtr &msg)
     if (ch == 27)
       { 
         cout << "\rESC Key pressed, Exiting." << endl;;
-  	    break;
+        break;
       }
-  	// Start/stop Calaulation by pressing spacebar
-  	if (ch == 32)
-  	  stopCalculationFlag = !stopCalculationFlag;
-  	// Clear all trackpoint by pressing 'c'
-  	if (ch == 99)
-  	  clearTrackingFlag = true;
-  	// Deploy new set of trackpoint by pressing 'd'
-  	if (ch == 100)
-  	{
-  		clearTrackingFlag = true;
-  	 	pointTrackingFlag = true;
-  	}
+    // Start/stop Calaulation by pressing spacebar
+    if (ch == 32)
+      stopCalculationFlag = !stopCalculationFlag;
+    // Clear all trackpoint by pressing 'c'
+    if (ch == 99)
+      clearTrackingFlag = true;
+    // Deploy new set of trackpoint by pressing 'd'
+    if (ch == 100)
+    {
+      clearTrackingFlag = true;
+      pointTrackingFlag = true;
+    }
 
     // Update 'previous' to 'current' point vector
     std::swap(trackingPoints[1], trackingPoints[0]);
