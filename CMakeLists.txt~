@@ -132,14 +132,14 @@ include_directories(
 # add_dependencies(range_height_finder ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Declare a C++ executable
-add_executable(opencv_tutorial src/opencv_tutorial.cpp)
+add_executable(range_height_finder src/range_height_finder.cpp)
 
 ## Add cmake target dependencies of the executable
 ## same as for the library above
-add_dependencies(opencv_tutorial ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
+add_dependencies(range_height_finder ${${PROJECT_NAME}_EXPORTED_TARGETS} ${catkin_EXPORTED_TARGETS})
 
 ## Specify libraries to link a library or executable target against
- target_link_libraries(opencv_tutorial
+ target_link_libraries(range_height_finder
    ${catkin_LIBRARIES}
    ${OpenCV_LIBRARIES}
 )
