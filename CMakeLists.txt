@@ -9,6 +9,7 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   roscpp
   std_msgs
+  pcl_ros
 )
 
 find_package(OpenCV EXACT 3.1.0 REQUIRED)

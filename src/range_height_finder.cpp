@@ -8,6 +8,11 @@
 #include <tf/transform_datatypes.h>
 #include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/PointCloud2.h>
+#include <pcl/point_cloud.h>
+#include <pcl/point_types.h>
+#include <pcl/conversions.h>
+#include <pcl_conversions/pcl_conversions.h>
 // OpenCV Header
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -20,6 +25,8 @@
 float PI = 3.141592653589793;
 
 static const std::string OPENCV_WINDOW = "Image window";
+
+typedef pcl::PointCloud<pcl::PointXYZ> PointCloud;
 
 using namespace cv;
 using namespace std;
@@ -50,10 +57,11 @@ float deltaPos;
 Point2f currentPos;
 float currentLinearMotion;
 float cameraHeight = 0.312;
-float xDist, xDistC, height, horizonAngle;
+float xDist, xDistC, height, horizonAngle, horizonAngleRad;
 vector<Point2f> locationOfInitiation;
 vector<int> calculateWithBackwardMotion;
 bool addToBackwardMotionVector = false;
+int pclCount;
 
 // Pitch and roll check with IMU data used to decide whether to stop the calculation or not 
 // because the camera is not in horizontal position when robot is tilting.
@@ -117,6 +125,7 @@ class ImageConverter
   //image_transport::Publisher image_pub_;
   ros::Subscriber subOdom;
   ros::Subscriber imuData;
+  ros::Publisher pointCloudPub;
   
 public:
   ImageConverter()
@@ -124,6 +133,7 @@ public:
   {
     subOdom = nh_.subscribe("/ypspur_ros/odom", 1, &ImageConverter::cbOdom,this);
     imuData = nh_.subscribe("/imu/data", 1, &ImageConverter::cbImu,this);
+    pointCloudPub = nh_.advertise<sensor_msgs::PointCloud2> ("frtcampcl",1);
   }
 
   void cbOdom(const nav_msgs::Odometry::ConstPtr &msg)
@@ -145,7 +155,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
     // To slow down the processing causing CPU overload
     //ros::Duration wait(2.0);
 
-    // Open camera
+  // Open camera
   VideoCapture cap(1);
 
   // Check whether the camera is open yet
@@ -162,6 +172,11 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
       desiredPoint.push_back(Point2f(desiredX[i], desiredY[j]));
     }
   }
+
+  // PointCloud initialization
+  sensor_msgs::PointCloud2 pclMsg;
+  pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ds(new pcl::PointCloud<pcl::PointXYZ>);
+  pc_ds->header.frame_id = "odom";
 
   TermCriteria terminationCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 10, 0.02);
 
@@ -457,8 +472,8 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
               xDist = -xDist;
           }
 
-          horizonAngle = (360*((aHorizonConstant*trackingPoints[0][goodPointsVecTransfer[i]].x)+bHorizonConstant))/(2*PI);
-
+          horizonAngleRad = ((aHorizonConstant*trackingPoints[0][goodPointsVecTransfer[i]].x)+bHorizonConstant);
+          horizonAngle = (360*horizonAngleRad)/(2*PI);
           // height calculation (How high is the object)
           height = xDist*tan(aConstant*trackingPoints[1][goodPointsVecTransfer[i]].y + bConstant) + cameraHeight;
 
@@ -520,6 +535,8 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
               }
             }
           }
+          // Save point to pcl points to be published
+          pc_ds->points.push_back (pcl::PointXYZ(tan(horizonAngleRad)*xDist, xDist, height));
         }
       }
 
@@ -653,6 +670,14 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
       clearTrackingFlag = true;
       pointTrackingFlag = true;
     }
+
+    // Set pcl array width and height, covert to sensor_msg and publish the pcl
+    pc_ds->height = 1;
+    pc_ds->width = pc_ds->points.size();
+    pcl::toROSMsg(*pc_ds, pclMsg);
+    pclMsg.header.stamp = ros::Time::now();
+    pointCloudPub.publish (pclMsg);
+    pc_ds->points.clear();
 
     // Update 'previous' to 'current' point vector
     std::swap(trackingPoints[1], trackingPoints[0]);
