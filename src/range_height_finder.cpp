@@ -32,22 +32,20 @@ using namespace cv;
 using namespace std;
 
 // Good Point border criteria
-int borderLeft = 110, borderRight = 530, borderLower = 220, borderUpper = 74;
+int borderLeft = 75, borderRight = 900, borderLower = 265, borderUpper = 85;
 
 // Warning, Danger trigger border criteria
-int triggerBorderLeft = 250, triggerBorderRight = 390, triggerBorderLower = 160, triggerBorderUpper = 74;
+int triggerBorderLeft = 360, triggerBorderRight = 600, triggerBorderLower = 170, triggerBorderUpper = 85;
 
 // Camera verical axis calibration equation
 // Camera y pixel vs angle slope equation (Linear Equation) refer to excel file
 // [angle = Ay + B]
-/*float aConstant = -0.00305;
-float bConstant = 0.678;*/
-float aConstant = -0.00400673;
-float bConstant = 0.97309;
+float aConstant = -0.002776;
+float bConstant = 0.752686;
 
 // Camera horizontal axis calibration equation
-float aHorizonConstant = 0.0051887;
-float bHorizonConstant = -1.695288;
+float aHorizonConstant = 0.0023787;
+float bHorizonConstant = -1.144790;
 
 // deltaX is how far the camera has moved in X direction, deltaY is in Y direction, deltaPos is the displacement,
 // currentPos is where the robot now, cameraHeight is the height of the camera from the ground
@@ -56,7 +54,7 @@ float deltaY;
 float deltaPos;
 Point2f currentPos;
 float currentLinearMotion;
-float cameraHeight = 0.312;
+float cameraHeight = 0.38;
 float xDist, xDistC, height, horizonAngle, horizonAngleRad;
 vector<Point2f> locationOfInitiation;
 vector<int> calculateWithBackwardMotion;
@@ -70,35 +68,28 @@ float imuRollLimit = 0.0095;
 float imuPitch, imuRoll;
 bool pitchRollWarning;
 
-// Distance Error Correction !!REMOVED!! (Parabolic Equation) refer to excel file
-// [Error Percentage = cConstant y^2 + dConstant y +eConstant]
-// Turn this function on or off with the errorCompensation bool variable
-/*
-float cConstant = 0.0025;
-float dConstant = -0.6445;
-float eConstant = 45.775;
-bool errorCompensation = false;*/
-
 // Odometry Error Correction
 // A temporary workaround on the report of the odometry data from robot that is linearly inaccurate.
 float odomErrorCorrection = 1;
 
 // Set the desired point grid
-// For 640x480
-int desiredX[13] = { 140,170,200,230,260,290,320,350,380,410,440,470,500 };
-int desiredY[5] = { 100,130,160,190,210 };
+// For 960x540
+int desiredX[16] = { 100,150,200,250,300,350,400,450,500,550,600,650,700,750,800,850 };
+int desiredY[5] = { 100,140,180,220,260 };
 
 // Point accumulation check
-vector<int> pointAccumulationCheckIndex[6][3];
-int zoneBorderHorizontal[7] = {110,180,250,320,390,460,531};
-int zoneBorderVertical[4] = {70,120,170,221};
+// For 960x540
+int maxPointInAZone = 10;
+vector<int> pointAccumulationCheckIndex[9][3];
+int zoneBorderHorizontal[10] = {50,150,250,350,450,550,650,750,850,901};
+int zoneBorderVertical[4] = {80,160,240,280};
 
 // Camera calibration for undistortion
-Mat cameraMatrix1 = (Mat_<double>(3,3) << 3.7562890829701979e+02, 0., 320.,
-    0., 3.7562890829701979e+02, 240.,
-    0., 0., 1.);
-    Mat distCoef1 = (Mat_<double>(5,1) << -3.7568807123087655e-01, 1.4804966706210765e-01, 0., 0.,
-    -2.6655460202595321e-02);
+	Mat cameraMatrix1 = (Mat_<double>(3,3) << 1.0501385794410448e+03, 0., 960., 0., 1.0501385794410448e+03,
+	540., 0., 0., 1.);
+    Mat distCoef1 = (Mat_<double>(5,1) << -2.5516666807314803e-01, 1.6890821185525082e-02, 0., 0.,
+    1.2221616752393763e-02);
+
 
 // Declaring some flags
 bool pointTrackingFlag = true;
@@ -164,8 +155,11 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
     cerr << "Unable to open the webcam." << endl;
   }
 
+  cap.set(CV_CAP_PROP_FRAME_WIDTH,1920);
+  cap.set(CV_CAP_PROP_FRAME_HEIGHT,1080);
+
   // Push desired (x,y) in vector of desiredPoint
-  for (int i = 0; i < 13; i++)
+  for (int i = 0; i < 16; i++)
   {
     for (int j = 0; j < 5; j++)
     {
@@ -184,7 +178,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
   Size windowSize(25, 25);
 
   // Max number of points
-  const int maxNumPoints = 65;
+  const int maxNumPoints = 80;
 
   string windowName = "Height and Range finder";
   namedWindow(windowName, 1);
@@ -199,7 +193,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
   vector<int> goodPointsVecTransfer;
 
   // Image size scaling factor
-  float scalingFactor = 1.0;
+  float scalingFactor = 0.5;
 
     while(ros::ok())
     {
@@ -209,7 +203,8 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
       ros::spinOnce();
       // my code here
 
-    cap >> originalDistortedFrame;
+    for (int i = 0; i < 6; i++)
+    	cap >> originalDistortedFrame;
 
     if (originalDistortedFrame.empty())
       break;
@@ -224,10 +219,10 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
                 CV_16SC2, map1, map2);
 
     remap(originalDistortedFrame, frame, map1, map2, INTER_LINEAR);
-    
+
     // Resize the frame if needed
     resize(frame, frame, Size(), scalingFactor, scalingFactor, INTER_AREA);
-
+    
     frame.copyTo(image);
 
     cvtColor(image, curGrayImage, COLOR_BGR2GRAY);
@@ -432,7 +427,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
         } 
 
         // Point Accumulation Check by categorize point into zone.
-        for (int d = 0; d < 6; d++)
+        for (int d = 0; d < 9; d++)
         {
           if (trackingPoints[1][goodPointsVecTransfer[i]].x >= zoneBorderHorizontal[d]
               && trackingPoints[1][goodPointsVecTransfer[i]].x < zoneBorderHorizontal[d+1])
@@ -477,32 +472,6 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
           // height calculation (How high is the object)
           height = xDist*tan(aConstant*trackingPoints[1][goodPointsVecTransfer[i]].y + bConstant) + cameraHeight;
 
-          // Error compensation (removed because image is already undistorted)
-          /*if (errorCompensation)
-          {
-            // xDist error compensation
-            xDistC = xDist - abs((xDist*(((cConstant*calculatePoints[0][goodPointsVecTransfer[i]].y*calculatePoints[0][goodPointsVecTransfer[i]].y)
-              + (dConstant*calculatePoints[0][goodPointsVecTransfer[i]].y) + eConstant) / 100)));
-          }*/
-
-          // Print out the distance and height This one print every point out.
-          /*if (xDist < 0 || xDist >= 15)
-            cout << "Point " << goodPointsVecTransfer[i] << "(" << calculatePoints[0][goodPointsVecTransfer[i]].x << ","
-            << calculatePoints[0][goodPointsVecTransfer[i]].y << ") " << " cannot be calculated. deltaPos is " << deltaPos << endl;
-          else
-          {
-            if (errorCompensation)
-            {
-              cout << "Point " << goodPointsVecTransfer[i] << "(" << calculatePoints[0][goodPointsVecTransfer[i]].x << ","
-                << calculatePoints[0][goodPointsVecTransfer[i]].y << ") height is " << height << "m and it is " << xDistC << "m (" << xDist << "m ) away. deltaPos is " << deltaPos << endl;
-            }
-            else
-            {
-              cout << "Point " << goodPointsVecTransfer[i] << "(" << calculatePoints[0][goodPointsVecTransfer[i]].x << ","
-                << calculatePoints[0][goodPointsVecTransfer[i]].y << ") height is " << height << "m and it is " << xDist << "m  away. deltaPos is " << deltaPos << endl;
-            }
-          }*/
-
           // Miscalculation check.
           if (height <= 0 || xDist <= 0)
               continue;
@@ -541,11 +510,11 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
       }
 
       // Check if point accumulation policy is being violated
-      for (int d = 0; d < 6; d++)
+      for (int d = 0; d < 10; d++)
       {
-        for (int e = 0; e < 3; e++)
+        for (int e = 0; e < 4; e++)
         {
-          if (pointAccumulationCheckIndex[d][e].size() >= 10)
+          if (pointAccumulationCheckIndex[d][e].size() >= maxPointInAZone)
           {
             for (int f = 0; f < pointAccumulationCheckIndex[d][e].size(); f++)
             {
@@ -574,9 +543,9 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
       calculateWithBackwardMotion.clear();
       addToBackwardMotionVector = false;
 
-      for (int d = 0; d < 6; d++)
+      for (int d = 0; d < 10; d++)
       {
-        for (int e = 0; e < 3; e++)
+        for (int e = 0; e < 4; e++)
         {
           pointAccumulationCheckIndex[d][e].clear();
         }
