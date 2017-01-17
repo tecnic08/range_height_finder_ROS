@@ -54,12 +54,15 @@ float deltaY;
 float deltaPos;
 Point2f currentPos;
 float currentLinearMotion;
-float cameraHeight = 0.38;
 float xDist, xDistC, height, horizonAngle, horizonAngleRad;
 vector<Point2f> locationOfInitiation;
 vector<int> calculateWithBackwardMotion;
 bool addToBackwardMotionVector = false;
 int pclCount;
+
+// Camera coordinate compensator
+float cameraHeight = 0.38;
+float cameraDist = 0.23;
 
 // Pitch and roll check with IMU data used to decide whether to stop the calculation or not 
 // because the camera is not in horizontal position when robot is tilting.
@@ -137,8 +140,8 @@ public:
 void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
 {
   // Assign IMU data from sensor msg to global variable
-  imuPitch = msg->orientation.y;
-  imuRoll = msg->orientation.x;
+  imuPitch = msg->orientation.x;
+  imuRoll = msg->orientation.y;
 }
 
   void spin()
@@ -170,7 +173,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
   // PointCloud initialization
   sensor_msgs::PointCloud2 pclMsg;
   pcl::PointCloud<pcl::PointXYZ>::Ptr pc_ds(new pcl::PointCloud<pcl::PointXYZ>);
-  pc_ds->header.frame_id = "odom";
+  pc_ds->header.frame_id = "base_link";
 
   TermCriteria terminationCriteria(CV_TERMCRIT_ITER | CV_TERMCRIT_EPS, 10, 0.02);
 
@@ -363,7 +366,6 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
       std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
       std::cout.precision(2);
 
-
       for (int i = 0; i < goodPointsVecTransfer.size(); i++)
       {
         // Get deltaX and delta Y.
@@ -484,7 +486,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
           {
             if(trackingPoints[1][goodPointsVecTransfer[i]].y <= triggerBorderLower && trackingPoints[1][goodPointsVecTransfer[i]].y >= triggerBorderUpper)
             {
-              if (height <= 1.2 && xDist <= 0.5)
+              if (height <= 1.2 && xDist <= 0.8)
               {
                 if (!thereIsAPreviousLine)
                   cout << endl;
@@ -493,7 +495,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
                 cout << "*DANGER: Point " << goodPointsVecTransfer[i] <<": H = " << height <<"m D = " << xDist <<"m. Angle is " << horizonAngle << endl;
                 thereIsAPreviousLine = true;
               }
-              else if (height <= 1.2 && xDist <= 1.0)
+              else if (height <= 1.2 && xDist <= 1.2)
               {
                 if (!thereIsAPreviousLine)
                   cout << endl;
@@ -505,14 +507,14 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
             }
           }
           // Save point to pcl points to be published
-          pc_ds->points.push_back (pcl::PointXYZ(tan(horizonAngleRad)*xDist, xDist, height));
+          pc_ds->points.push_back (pcl::PointXYZ(tan(horizonAngleRad)*(xDist + cameraDist), (xDist + cameraDist), height));
         }
       }
 
       // Check if point accumulation policy is being violated
-      for (int d = 0; d < 10; d++)
+      for (int d = 0; d < 9; d++)
       {
-        for (int e = 0; e < 4; e++)
+        for (int e = 0; e < 3; e++)
         {
           if (pointAccumulationCheckIndex[d][e].size() >= maxPointInAZone)
           {
@@ -525,6 +527,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
           pointAccumulationCheckIndex[d][e].clear();
         }
       }
+
       calculateTrackpointFlag = false;
     }
 
@@ -543,9 +546,9 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
       calculateWithBackwardMotion.clear();
       addToBackwardMotionVector = false;
 
-      for (int d = 0; d < 10; d++)
+      for (int d = 0; d < 9; d++)
       {
-        for (int e = 0; e < 4; e++)
+        for (int e = 0; e < 3; e++)
         {
           pointAccumulationCheckIndex[d][e].clear();
         }
@@ -556,7 +559,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
     }
 
     // Refining the location of the feature points
-    if (pointTrackingFlag && trackingPoints[1].size() < maxNumPoints)
+    if (pointTrackingFlag&& trackingPoints[1].size() < maxNumPoints)
     {
       for (int k = 0; k < desiredPoint.size(); k++)
       {
@@ -617,6 +620,7 @@ void cbImu(const sensor_msgs::Imu::ConstPtr &msg)
       if (pointNeedsRecenter.empty())
             recenterOffGridPointFlag = false;
     }
+    
 
     imshow(windowName, image);
 
